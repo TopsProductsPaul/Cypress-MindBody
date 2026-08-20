@@ -1,0 +1,19 @@
+{
+  "name": "cypress-mindbody",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cypress E2E for Minbody",
+  "license": "ISC",
+  "type": "commonjs",
+  "scripts": {
+    "cypress:open": "cypress open --browser chrome --e2e",
+    "cypress:open:local": "cypress open --browser chrome --e2e --env environment=local",
+    "cypress:run": "cypress run --browser chrome",
+    "cypress:run:local": "cypress run --browser chrome --env environment=local",
+    "cypress:run:smoke": "cypress run --browser chrome --env environment=local,grepTags=@smoke"
+  },
+  "devDependencies": {
+    "@cypress/grep": "^6.0.2",
+    "cypress": "^15.20.1"
+  }
+}

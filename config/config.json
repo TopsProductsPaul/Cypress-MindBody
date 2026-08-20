@@ -1,0 +1,19 @@
+{
+  "loginCredentials": {
+    "owner": {
+      "email": "owner@minbody.dev",
+      "password": "Passw0rd!23"
+    },
+    "staff": {
+      "email": "staff@minbody.dev",
+      "password": "Passw0rd!23"
+    }
+  },
+  "environments": {
+    "local": {
+      "baseUrl": "https://localhost:55001",
+      "adminBaseUrl": "https://localhost:55101",
+      "apiBaseUrl": "https://localhost:55201"
+    }
+  }
+}
