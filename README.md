@@ -28,3 +28,5 @@ this repo has a stable URL to test against.
 - `cy.loginAdmin('owner' | 'staff')` drives the real login form (no token-injection shortcut yet
   — there's only one login flow so far, so exercising it for real is more honest and no slower).
 - Specs live under `cypress/e2e/<app>/<positive|negative>/`.
+- See [`docs/best-practices.md`](docs/best-practices.md) — adapted from Helper3.0's Cypress3.0,
+  stripped of everything specific to that codebase's stack/scale/domain.
