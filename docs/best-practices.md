@@ -27,6 +27,20 @@ this repo's take on it, not a replacement for it.
 - **Prefer explicit chains over `forEach` loops** for repeated checks. A loop that enqueues many
   commands from synchronous iteration hides failures in the command log and makes retries hard to
   read. Repeat the `cy.get()` block explicitly in the `it()` body instead.
+- **A custom command that triggers async navigation must wait for it to land before returning.**
+  `cy.loginAdmin()` used to end on `.click()` — the click resolves the instant the DOM event
+  fires, not once the login POST finishes and the SPA finishes its client-side redirect. A caller
+  that immediately did `cy.visitAdmin(...)` could race that redirect and land on a
+  half-authenticated page. Fixed by adding `cy.location('pathname').should('not.eq', '/login')` as
+  the command's last step, so every caller gets the wait for free instead of needing to remember
+  it. If you add a command that logs in, submits a form, or otherwise kicks off an async
+  navigation, give it the same guarantee.
+- **localStorage outlives the test, not just the page.** Cypress's test isolation clears cookies
+  and navigation state between tests, but not localStorage — a JWT written by an earlier test is
+  still there on the next `cy.visit()`. A page that redirects when already authenticated (like
+  `/login`) will fire that redirect before your test gets a chance to interact with it. Commands
+  that assume a logged-out starting state need to clear their own storage first, not assume the
+  browser gave them one.
 
 ## Selectors
 

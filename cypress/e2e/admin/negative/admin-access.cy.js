@@ -18,6 +18,7 @@ describe('Admin auth — negative cases', { tags: ['@smoke'] }, () => {
 
   it('shows an access-denied view (not a redirect loop) when staff hits the Owner-only page directly', () => {
     cy.loginAdmin('staff');
+    cy.location('pathname').should('eq', '/'); // wait for login to actually land before navigating away
 
     cy.visitAdmin('/organization');
     cy.get('[data-cy="access-denied"]').should('be.visible');
