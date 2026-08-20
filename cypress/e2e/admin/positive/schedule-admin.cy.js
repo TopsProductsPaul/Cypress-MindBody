@@ -1,94 +1,309 @@
-describe('Schedule Admin (owner)', { tags: ['@smoke'] }, () => {
-  const runId = Date.now();
-  const headcountServiceName = 'Schedule Test Service'; // seeded or created by other tests; we pick by index
+const apiRequest = (method, path, body) => (
+  cy.window().then((win) => {
+    const token = win.localStorage.getItem('minbody.auth.token');
+    return cy.request({
+      method,
+      url: `${Cypress.env('apiBaseUrl')}${path}`,
+      headers: { Authorization: `Bearer ${token}` },
+      body,
+      failOnStatusCode: false,
+    });
+  })
+);
 
+const getScenarioData = () => (
+  apiRequest('GET', '/services').then((servicesResponse) => {
+    expect(servicesResponse.status).to.eq(200);
+    expect(servicesResponse.body).to.have.length.greaterThan(0);
+
+    return apiRequest('GET', '/clients').then((clientsResponse) => {
+      expect(clientsResponse.status).to.eq(200);
+      expect(clientsResponse.body).to.have.length.greaterThan(1);
+
+      return apiRequest('GET', '/schedule/resources').then((resourcesResponse) => {
+        expect(resourcesResponse.status).to.eq(200);
+        return {
+          service: servicesResponse.body[0],
+          clients: clientsResponse.body,
+          resource: resourcesResponse.body.find((resource) => resource.name === 'Reformer Studio'),
+        };
+      });
+    });
+  })
+);
+
+const createSession = (serviceId, capacity, startsAt, resourceId = null) => (
+  apiRequest('POST', '/schedule/sessions', {
+    serviceId,
+    resourceId,
+    primaryStaffMembershipId: null,
+    startsAt,
+    endsAt: new Date(new Date(startsAt).getTime() + 60 * 60 * 1000).toISOString(),
+    capacityOverride: capacity,
+    isPublished: true,
+    recurrenceRule: null,
+    seriesId: null,
+  }).then((response) => {
+    expect(response.status).to.eq(201);
+    expect(response.body.id).to.be.a('string').and.not.be.empty;
+    return response.body;
+  })
+);
+
+const openSession = (sessionId) => {
+  cy.visitAdmin('/schedule');
+  cy.location('pathname').should('eq', '/schedule');
+  cy.document().its('readyState').should('eq', 'complete');
+  cy.get(`[data-cy="schedule-row"][data-session-id="${sessionId}"]`)
+    .find('[data-cy="schedule-view-button"]')
+    .click();
+  cy.get('[data-cy="schedule-detail"]').should('be.visible');
+};
+
+const selectOption = (selector, value) => {
+  cy.get(selector).select(value);
+  cy.get(selector).should('have.value', value);
+};
+
+describe('Schedule booking and waitlist workflows (owner)', { tags: ['@smoke'] }, () => {
   beforeEach(() => {
     cy.loginAdmin('owner');
   });
 
-  it('creates a headcount session, books a client, cancels, and checks in', () => {
-    cy.get('[data-cy="nav-schedule"]').click();
-    cy.location('pathname').should('eq', '/schedule');
+  it('books a named reformer spot and removes it from availability', () => {
+    const startsAt = '2030-01-11T10:00:00.000Z';
 
-    // Open create form
-    cy.get('[data-cy="schedule-new-session"]').click();
-    cy.get('[data-cy="schedule-create-form"]').should('exist');
+    getScenarioData().then(({ service, clients, resource }) => {
+      expect(resource, 'seeded spot resource').to.exist;
 
-    // Pick first available service (select by changing value)
-    cy.get('[data-cy="schedule-service-select"]').then(($sel) => {
-      const opts = $sel.find('option');
-      // choose the first non-empty option
-      for (let i = 0; i < opts.length; i++) {
-        if (opts[i].value) { $sel.val(opts[i].value); break; }
-      }
-      $sel.trigger('change');
+      createSession(service.id, 0, startsAt, resource.id).then((session) => {
+        apiRequest('GET', `/schedule/sessions/${session.id}`).then((detailResponse) => {
+          expect(detailResponse.status).to.eq(200);
+          expect(detailResponse.body.freeSpots).to.have.length.greaterThan(0);
+
+          const client = clients[0];
+          const spot = detailResponse.body.freeSpots[0];
+          openSession(session.id);
+
+          selectOption('[data-cy="book-client-select"]', client.id);
+          selectOption('[data-cy="book-spot-select"]', spot.id);
+
+          cy.intercept('POST', '**/bookings').as('createBooking');
+          cy.get('[data-cy="book-client-button"]').click();
+          cy.wait('@createBooking').its('response.statusCode').should('eq', 201);
+
+          cy.get('[data-cy="booking-row"]')
+            .should('have.length', 1)
+            .and('contain.text', client.name)
+            .and('contain.text', spot.label)
+            .and('contain.text', 'Reserved');
+          cy.get('[data-cy="book-spot-select"]')
+            .find(`option[value="${spot.id}"]`)
+            .should('not.exist');
+        });
+      });
     });
+  });
 
-    // Set future start/end (use a stable future time for demo)
-    const startVal = '2026-08-25T10:00';
-    const endVal = '2026-08-25T11:00';
-    cy.get('[data-cy="schedule-start-input"]').invoke('val', startVal).trigger('change');
-    cy.get('[data-cy="schedule-end-input"]').invoke('val', endVal).trigger('change');
+  it('rejects a spot booking when no spot was selected', () => {
+    const startsAt = '2030-01-12T10:00:00.000Z';
 
-    // Ensure published
-    cy.get('[data-cy="schedule-published"]').check();
+    getScenarioData().then(({ service, clients, resource }) => {
+      expect(resource, 'seeded spot resource').to.exist;
 
-    cy.get('[data-cy="schedule-create-save"]').click();
+      createSession(service.id, 0, startsAt, resource.id).then((session) => {
+        openSession(session.id);
+        selectOption('[data-cy="book-client-select"]', clients[0].id);
+        cy.get('[data-cy="book-spot-select"]').should('have.value', '');
 
-    // Back to list; should see a row with our time or at least rows exist
-    cy.get('[data-cy="schedule-table"]').should('exist');
-    cy.get('[data-cy="schedule-row"]').should('have.length.greaterThan', 0);
-
-    // Open the first row's detail (or one containing our time if visible)
-    cy.get('[data-cy="schedule-row"]').first().find('[data-cy="schedule-view-button"]').click();
-    cy.get('[data-cy="schedule-detail"]').should('exist');
-
-    // Book a seeded client (Alex Rivera or first available)
-    cy.get('[data-cy="book-client-select"]').then(($sel) => {
-      const opts = $sel.find('option');
-      for (let i = 0; i < opts.length; i++) {
-        if (opts[i].value) { $sel.val(opts[i].value); break; }
-      }
-      $sel.trigger('change');
+        cy.intercept('POST', '**/bookings').as('missingSpotBooking');
+        cy.get('[data-cy="book-client-button"]').click();
+        cy.wait('@missingSpotBooking').its('response.statusCode').should('eq', 400);
+        cy.get('[data-cy="schedule-detail-error"]').should('have.text', 'Failed to book client.');
+        cy.get('[data-cy="booking-table"]').should('not.exist');
+      });
     });
+  });
 
-    cy.get('[data-cy="book-client-button"]').click();
+  it('rejects a duplicate client booking without adding a second row', () => {
+    const startsAt = '2030-01-13T10:00:00.000Z';
 
-    // A booking row should appear (status Reserved)
-    cy.get('[data-cy="schedule-detail"]').should('contain.text', 'Reserved');
+    getScenarioData().then(({ service, clients }) => {
+      const client = clients[0];
 
-    // Cancel the first booking
-    cy.get('[data-cy="booking-cancel-button"]').first().click();
+      createSession(service.id, 2, startsAt).then((session) => {
+        openSession(session.id);
+        selectOption('[data-cy="book-client-select"]', client.id);
 
-    // After cancel, the booking list should update (no more that booking or status changed)
-    // For simplicity, re-select the session and confirm we can still see the detail
-    cy.get('[data-cy="schedule-detail-close"]').click();
-    cy.get('[data-cy="schedule-row"]').first().find('[data-cy="schedule-view-button"]').click();
+        cy.intercept('POST', '**/bookings').as('firstBooking');
+        cy.get('[data-cy="book-client-button"]').click();
+        cy.wait('@firstBooking').its('response.statusCode').should('eq', 201);
+        cy.get('[data-cy="booking-row"]').should('have.length', 1);
 
-    // Re-book to test check-in
-    cy.get('[data-cy="book-client-select"]').then(($sel) => {
-      const opts = $sel.find('option');
-      for (let i = 0; i < opts.length; i++) {
-        if (opts[i].value) { $sel.val(opts[i].value); break; }
-      }
-      $sel.trigger('change');
+        selectOption('[data-cy="book-client-select"]', client.id);
+        cy.intercept('POST', '**/bookings').as('duplicateBooking');
+        cy.get('[data-cy="book-client-button"]').click();
+        cy.wait('@duplicateBooking').its('response.statusCode').should('eq', 400);
+
+        cy.get('[data-cy="schedule-detail-error"]').should('have.text', 'Failed to book client.');
+        cy.get('[data-cy="booking-row"]')
+          .should('have.length', 1)
+          .and('contain.text', client.name)
+          .and('contain.text', 'Reserved');
+      });
     });
-    cy.get('[data-cy="book-client-button"]').click();
+  });
 
-    // Check in
-    cy.get('[data-cy="booking-checkin-button"]').first().click();
+  it('rejects a second client when a headcount session is full', () => {
+    const startsAt = '2030-01-14T10:00:00.000Z';
 
-    // Close detail
-    cy.get('[data-cy="schedule-detail-close"]').click();
-    cy.location('pathname').should('eq', '/schedule');
+    getScenarioData().then(({ service, clients }) => {
+      createSession(service.id, 1, startsAt).then((session) => {
+        openSession(session.id);
+        selectOption('[data-cy="book-client-select"]', clients[0].id);
+
+        cy.intercept('POST', '**/bookings').as('capacityBooking');
+        cy.get('[data-cy="book-client-button"]').click();
+        cy.wait('@capacityBooking').its('response.statusCode').should('eq', 201);
+
+        selectOption('[data-cy="book-client-select"]', clients[1].id);
+        cy.intercept('POST', '**/bookings').as('fullBooking');
+        cy.get('[data-cy="book-client-button"]').click();
+        cy.wait('@fullBooking').its('response.statusCode').should('eq', 400);
+
+        cy.get('[data-cy="schedule-detail-error"]').should('have.text', 'Failed to book client.');
+        cy.get('[data-cy="booking-row"]')
+          .should('have.length', 1)
+          .and('contain.text', clients[0].name)
+          .and('not.contain.text', clients[1].name);
+      });
+    });
+  });
+
+  it('promotes the first waiter when the reserved booking is cancelled', () => {
+    const startsAt = '2030-01-15T10:00:00.000Z';
+
+    getScenarioData().then(({ service, clients }) => {
+      const bookedClient = clients[0];
+      const waitingClient = clients[1];
+
+      createSession(service.id, 1, startsAt).then((session) => {
+        apiRequest('POST', '/bookings', {
+          scheduledSessionId: session.id,
+          clientId: bookedClient.id,
+          resourceSpotId: null,
+        }).then((bookingResponse) => {
+          expect(bookingResponse.status).to.eq(201);
+
+          apiRequest('POST', '/schedule/waitlist', {
+            scheduledSessionId: session.id,
+            clientId: waitingClient.id,
+          }).then((waitlistResponse) => {
+            expect(waitlistResponse.status).to.eq(201);
+            expect(waitlistResponse.body.position).to.eq(1);
+
+            openSession(session.id);
+            cy.get('[data-cy="booking-row"]')
+              .should('have.length', 1)
+              .and('contain.text', bookedClient.name)
+              .and('contain.text', 'Reserved');
+
+            cy.intercept('DELETE', '**/bookings/*').as('cancelBooking');
+            cy.get('[data-cy="booking-cancel-button"]').click();
+            cy.wait('@cancelBooking').its('response.statusCode').should('eq', 204);
+
+            cy.get('[data-cy="booking-row"]')
+              .should('have.length', 1)
+              .and('contain.text', waitingClient.name)
+              .and('contain.text', 'Reserved')
+              .and('not.contain.text', bookedClient.name);
+
+            apiRequest('GET', `/bookings?sessionId=${session.id}`).then((bookingsResponse) => {
+              expect(bookingsResponse.status).to.eq(200);
+              expect(bookingsResponse.body).to.have.length(1);
+              expect(bookingsResponse.body[0].clientId).to.eq(waitingClient.id);
+              expect(bookingsResponse.body[0].status).to.eq(0);
+            });
+          });
+        });
+      });
+    });
+  });
+
+  it('rejects duplicate waitlist entries and preserves the original queue position', () => {
+    const startsAt = '2030-01-16T10:00:00.000Z';
+
+    getScenarioData().then(({ service, clients }) => {
+      createSession(service.id, 1, startsAt).then((session) => {
+        const request = {
+          scheduledSessionId: session.id,
+          clientId: clients[1].id,
+        };
+
+        apiRequest('POST', '/schedule/waitlist', request).then((firstResponse) => {
+          expect(firstResponse.status).to.eq(201);
+          expect(firstResponse.body.position).to.eq(1);
+
+          apiRequest('POST', '/schedule/waitlist', request).then((duplicateResponse) => {
+            expect(duplicateResponse.status).to.eq(400);
+            expect(duplicateResponse.body.errors.waitlist).to.deep.eq(['Already on waitlist.']);
+          });
+        });
+      });
+    });
+  });
+
+  it('checks in a reserved booking and removes cancellation actions', () => {
+    const startsAt = '2030-01-17T10:00:00.000Z';
+
+    getScenarioData().then(({ service, clients }) => {
+      createSession(service.id, 2, startsAt).then((session) => {
+        openSession(session.id);
+        selectOption('[data-cy="book-client-select"]', clients[0].id);
+        cy.get('[data-cy="book-client-button"]').click();
+        cy.get('[data-cy="booking-row"]').should('contain.text', 'Reserved');
+
+        cy.intercept('POST', '**/schedule/sessions/*/check-in').as('checkIn');
+        cy.get('[data-cy="booking-checkin-button"]').click();
+        cy.wait('@checkIn').its('response.statusCode').should('eq', 200);
+
+        cy.get('[data-cy="booking-row"]')
+          .should('have.length', 1)
+          .and('contain.text', clients[0].name)
+          .and('contain.text', 'CheckedIn');
+        cy.get('[data-cy="booking-cancel-button"]').should('not.exist');
+        cy.get('[data-cy="booking-checkin-button"]').should('not.exist');
+      });
+    });
   });
 });
 
-describe('Schedule — negative cases', { tags: ['@smoke'] }, () => {
-  it('does not show the Schedule nav link to a staff account (Owner-only create)', () => {
+describe('Schedule authorization — negative cases', { tags: ['@smoke'] }, () => {
+  it('does not show Schedule navigation to a staff account', () => {
     cy.loginAdmin('staff');
-    // Nav may or may not render the link; the create action should be forbidden at API
-    // Per pattern in clients/services: staff should not see owner-only nav items
     cy.get('[data-cy="nav-schedule"]').should('not.exist');
+  });
+
+  it('rejects staff session creation at the API boundary', () => {
+    cy.loginAdmin('staff');
+
+    apiRequest('GET', '/services').then((servicesResponse) => {
+      expect(servicesResponse.status).to.eq(200);
+      expect(servicesResponse.body).to.have.length.greaterThan(0);
+
+      apiRequest('POST', '/schedule/sessions', {
+        serviceId: servicesResponse.body[0].id,
+        resourceId: null,
+        primaryStaffMembershipId: null,
+        startsAt: '2030-01-18T10:00:00.000Z',
+        endsAt: '2030-01-18T11:00:00.000Z',
+        capacityOverride: 1,
+        isPublished: true,
+        recurrenceRule: null,
+        seriesId: null,
+      }).then((response) => {
+        expect(response.status).to.eq(403);
+      });
+    });
   });
 });
