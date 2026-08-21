@@ -63,7 +63,7 @@ describe('Public booking site', { tags: ['@smoke'] }, () => {
     createSession(request, serviceId, startsAt).then((session) => {
       cy.visitWeb('/');
       cy.get(`[data-cy="public-session-row"][data-session-id="${session.id}"]`).should('be.visible').within(() => {
-        cy.get('[data-cy="public-session-remaining"]').should('contain.text', '8 spots left');
+        cy.get('[data-cy="public-session-remaining"]').should('contain.text', '8 left');
       });
     });
   });
@@ -94,7 +94,8 @@ describe('Public booking site', { tags: ['@smoke'] }, () => {
         cy.visitWeb(`/book/${session.id}`);
         cy.get('[data-cy="book-name-input"]').type('Spot Guest');
         cy.get('[data-cy="book-email-input"]').type(email);
-        cy.get('[data-cy="book-spot-select"]').select(1);
+        cy.get('[data-cy="book-spot-option"]').first().click();
+        cy.get('[data-cy="book-spot-option"]').first().should('have.class', 'selected');
         cy.get('[data-cy="book-submit-button"]').click();
 
         cy.get('[data-cy="book-confirmation"]').should('be.visible');
