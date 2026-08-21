@@ -186,10 +186,22 @@ describe('Schedule booking and waitlist workflows (owner)', { tags: ['@smoke'] }
 
   it('promotes the first waiter when the reserved booking is cancelled', () => {
     const startsAt = '2030-01-15T10:00:00.000Z';
+    const runId = Date.now();
 
-    getScenarioData().then(({ service, clients }) => {
-      const bookedClient = clients[0];
-      const waitingClient = clients[1];
+    // Dedicated, uniquely-named clients rather than the shared scenario client list: repeated
+    // Cypress runs against the same persisted dev database have accumulated near-duplicate names
+    // (e.g. multiple "Alex Rivera ..." variants), which made the "not.contain.text" check below
+    // false-positive against a same-prefixed but unrelated client.
+    const createClient = (name) => apiRequest('POST', '/clients', {
+      name, email: null, phone: null, notes: null, isActive: true, tags: [],
+    }).then((res) => {
+      expect(res.status).to.eq(201);
+      return { id: res.body.id, name: res.body.name };
+    });
+
+    getScenarioData().then(({ service }) => {
+      createClient(`Promo Booked ${runId}`).then((bookedClient) => {
+      createClient(`Promo Waiting ${runId}`).then((waitingClient) => {
 
       createSession(service.id, 1, startsAt).then((session) => {
         apiRequest('POST', '/bookings', {
@@ -231,13 +243,23 @@ describe('Schedule booking and waitlist workflows (owner)', { tags: ['@smoke'] }
           });
         });
       });
+      });
+      });
     });
   });
 
   it('assigns a real spot to a waitlisted client promoted into a spot-based session', () => {
     const startsAt = '2030-01-19T10:00:00.000Z';
+    const runId = Date.now();
 
-    getScenarioData().then(({ service, clients, resource }) => {
+    const createClient = (name) => apiRequest('POST', '/clients', {
+      name, email: null, phone: null, notes: null, isActive: true, tags: [],
+    }).then((res) => {
+      expect(res.status).to.eq(201);
+      return { id: res.body.id, name: res.body.name };
+    });
+
+    getScenarioData().then(({ service, resource }) => {
       expect(resource, 'seeded spot resource').to.exist;
 
       // capacityOverride: 0 -> effective capacity falls back to the resource's own spot count.
@@ -246,45 +268,54 @@ describe('Schedule booking and waitlist workflows (owner)', { tags: ['@smoke'] }
           const spots = detailResponse.body.freeSpots;
           expect(spots.length, 'seeded Reformer Studio spots').to.be.at.least(2);
 
-          // Fill every spot so the room is genuinely full, not just at headcount capacity.
+          // Dedicated, uniquely-named clients -- the shared scenario client list has
+          // accumulated duplicate names (e.g. multiple "Cancel Guest") across many prior runs,
+          // which made a later cy.contains(name) lookup match the wrong row.
+          const bookedClients = [];
           cy.wrap(spots).each((spot, i) => (
-            apiRequest('POST', '/bookings', {
-              scheduledSessionId: session.id,
-              clientId: clients[i].id,
-              resourceSpotId: spot.id,
-            }).then((res) => expect(res.status).to.eq(201))
+            createClient(`Spot Promo Client ${runId}-${i}`).then((client) => (
+              apiRequest('POST', '/bookings', {
+                scheduledSessionId: session.id,
+                clientId: client.id,
+                resourceSpotId: spot.id,
+              }).then((res) => {
+                expect(res.status).to.eq(201);
+                bookedClients.push(client);
+              })
+            ))
           )).then(() => {
-            const waitingClient = clients[spots.length];
-            apiRequest('POST', '/schedule/waitlist', {
-              scheduledSessionId: session.id,
-              clientId: waitingClient.id,
-            }).then((waitlistResponse) => {
-              expect(waitlistResponse.status).to.eq(201);
+            createClient(`Spot Promo Waiter ${runId}`).then((waitingClient) => {
+              apiRequest('POST', '/schedule/waitlist', {
+                scheduledSessionId: session.id,
+                clientId: waitingClient.id,
+              }).then((waitlistResponse) => {
+                expect(waitlistResponse.status).to.eq(201);
 
-              const vacatedSpot = spots[0];
-              const bookedClient = clients[0];
+                const vacatedSpot = spots[0];
+                const bookedClient = bookedClients[0];
 
-              openSession(session.id);
-              cy.intercept('DELETE', '**/bookings/*').as('cancelBooking');
-              cy.contains('[data-cy="booking-row"]', bookedClient.name)
-                .find('[data-cy="booking-cancel-button"]').click();
-              cy.wait('@cancelBooking').its('response.statusCode').should('eq', 204);
+                openSession(session.id);
+                cy.intercept('DELETE', '**/bookings/*').as('cancelBooking');
+                cy.contains('[data-cy="booking-row"]', bookedClient.name)
+                  .find('[data-cy="booking-cancel-button"]').click();
+                cy.wait('@cancelBooking').its('response.statusCode').should('eq', 204);
 
-              // The promoted waiter must show the actual vacated seat, not "—" (no spot), and
-              // that seat must not simultaneously read as still free.
-              cy.contains('[data-cy="booking-row"]', waitingClient.name)
-                .should('contain.text', 'Reserved')
-                .find('td').eq(1).should('have.text', vacatedSpot.label);
+                // The promoted waiter must show the actual vacated seat, not "—" (no spot), and
+                // that seat must not simultaneously read as still free.
+                cy.contains('[data-cy="booking-row"]', waitingClient.name)
+                  .should('contain.text', 'Reserved')
+                  .find('td').eq(1).should('have.text', vacatedSpot.label);
 
-              apiRequest('GET', `/schedule/sessions/${session.id}`).then((afterResponse) => {
-                expect(afterResponse.body.bookedCount).to.eq(spots.length);
-                expect(afterResponse.body.freeSpots).to.have.length(0);
-              });
+                apiRequest('GET', `/schedule/sessions/${session.id}`).then((afterResponse) => {
+                  expect(afterResponse.body.bookedCount).to.eq(spots.length);
+                  expect(afterResponse.body.freeSpots).to.have.length(0);
+                });
 
-              apiRequest('GET', `/bookings?sessionId=${session.id}`).then((rosterResponse) => {
-                const promoted = rosterResponse.body.find((b) => b.clientId === waitingClient.id);
-                expect(promoted.resourceSpotId, 'promoted booking should have an assigned spot').to.not.be.null;
-                expect(promoted.spotLabel).to.eq(vacatedSpot.label);
+                apiRequest('GET', `/bookings?sessionId=${session.id}`).then((rosterResponse) => {
+                  const promoted = rosterResponse.body.find((b) => b.clientId === waitingClient.id);
+                  expect(promoted.resourceSpotId, 'promoted booking should have an assigned spot').to.not.be.null;
+                  expect(promoted.spotLabel).to.eq(vacatedSpot.label);
+                });
               });
             });
           });

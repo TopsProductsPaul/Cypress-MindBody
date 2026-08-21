@@ -46,11 +46,11 @@ describe('Services CRUD (owner)', { tags: ['@smoke'] }, () => {
 
     cy.contains('[data-cy="services-row"]', updatedName).find('[data-cy="services-edit-link"]').click();
     cy.get('[data-cy="service-delete-button"]').click();
+    cy.get('[data-cy="service-delete-confirm-button"]').click();
 
     cy.location('pathname').should('eq', '/services');
     cy.get('[data-cy="services-table"]').should('not.contain.text', updatedName);
   });
-});
 
   it("won't hard-delete a service that has a scheduled session", () => {
     const sessionServiceName = `Session-Backed Service ${Date.now()}`;
@@ -90,6 +90,7 @@ describe('Services CRUD (owner)', { tags: ['@smoke'] }, () => {
 
     cy.contains('[data-cy="services-row"]', sessionServiceName).find('[data-cy="services-edit-link"]').click();
     cy.get('[data-cy="service-delete-button"]').click();
+    cy.get('[data-cy="service-delete-confirm-button"]').click();
 
     cy.get('[data-cy="service-form-error"]').should('be.visible').and('contain.text', 'inactive');
     cy.visitAdmin('/services');

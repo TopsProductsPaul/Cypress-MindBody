@@ -60,6 +60,7 @@ describe('Clients CRUD (owner)', { tags: ['@smoke'] }, () => {
     // history was a real bug -- the backend now blocks it and the form surfaces why).
     cy.contains('[data-cy="clients-row"]', updatedName).find('[data-cy="clients-edit-link"]').click();
     cy.get('[data-cy="client-delete-button"]').click();
+    cy.get('[data-cy="client-delete-confirm-button"]').click();
 
     cy.get('[data-cy="client-form-error"]').should('be.visible').and('contain.text', 'inactive');
     cy.location('pathname').should('include', '/clients/');
@@ -78,6 +79,7 @@ describe('Clients CRUD (owner)', { tags: ['@smoke'] }, () => {
 
     cy.contains('[data-cy="clients-row"]', freshName).find('[data-cy="clients-edit-link"]').click();
     cy.get('[data-cy="client-delete-button"]').click();
+    cy.get('[data-cy="client-delete-confirm-button"]').click();
 
     cy.location('pathname').should('eq', '/clients');
     cy.get('[data-cy="clients-table"]').should('not.contain.text', freshName);

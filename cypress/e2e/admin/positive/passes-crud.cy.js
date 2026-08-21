@@ -59,6 +59,7 @@ describe('Passes CRUD (owner)', { tags: ['@smoke'] }, () => {
 
     cy.contains('[data-cy="pass-types-row"]', updatedName).find('[data-cy="pass-types-edit-link"]').click();
     cy.get('[data-cy="pass-type-delete-button"]').click();
+    cy.get('[data-cy="pass-type-delete-confirm-button"]').click();
 
     cy.location('pathname').should('eq', '/pass-types');
     cy.get('[data-cy="pass-types-table"]').should('not.contain.text', updatedName);
@@ -94,7 +95,6 @@ describe('Passes CRUD (owner)', { tags: ['@smoke'] }, () => {
       cy.get('td').eq(4).should('have.text', 'Active');
     });
   });
-});
 
   it("won't hard-delete a pass type that's been sold to a client", () => {
     const soldPassName = `Sold Pack ${Date.now()}`;
@@ -121,6 +121,7 @@ describe('Passes CRUD (owner)', { tags: ['@smoke'] }, () => {
     cy.visitAdmin('/pass-types');
     cy.contains('[data-cy="pass-types-row"]', soldPassName).find('[data-cy="pass-types-edit-link"]').click();
     cy.get('[data-cy="pass-type-delete-button"]').click();
+    cy.get('[data-cy="pass-type-delete-confirm-button"]').click();
 
     cy.get('[data-cy="pass-type-form-error"]').should('be.visible').and('contain.text', 'inactive');
     cy.visitAdmin('/pass-types');

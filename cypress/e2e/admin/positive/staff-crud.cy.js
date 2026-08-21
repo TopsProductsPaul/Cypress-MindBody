@@ -59,6 +59,7 @@ describe('Staff CRUD (owner)', { tags: ['@smoke'] }, () => {
 
     cy.contains('[data-cy="staff-row"]', staffName).find('[data-cy="staff-edit-link"]').click();
     cy.get('[data-cy="staff-remove-button"]').click();
+    cy.get('[data-cy="staff-remove-confirm-button"]').click();
 
     cy.location('pathname').should('eq', '/staff');
     cy.get('[data-cy="staff-table"]').should('not.contain.text', staffName);
