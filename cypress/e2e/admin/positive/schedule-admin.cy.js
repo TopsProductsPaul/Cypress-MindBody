@@ -54,6 +54,10 @@ const openSession = (sessionId) => {
   cy.visitAdmin('/schedule');
   cy.location('pathname').should('eq', '/schedule');
   cy.document().its('readyState').should('eq', 'complete');
+  // The schedule defaults to a 14-day window (reduces the list to what's actually
+  // decision-relevant); this spec's fixture sessions are deliberately far in the future for
+  // test isolation, so clear the filter to bring them back into view.
+  cy.get('[data-cy="schedule-filter-clear"]').click();
   cy.get(`[data-cy="schedule-row"][data-session-id="${sessionId}"]`)
     .find('[data-cy="schedule-view-button"]')
     .click();
@@ -273,6 +277,29 @@ describe('Schedule booking and waitlist workflows (owner)', { tags: ['@smoke'] }
           .and('contain.text', 'CheckedIn');
         cy.get('[data-cy="booking-cancel-button"]').should('not.exist');
         cy.get('[data-cy="booking-checkin-button"]').should('not.exist');
+      });
+    });
+  });
+
+  it('hides a far-future session by default and reveals it via the date filter', () => {
+    const startsAt = '2033-06-01T09:00:00.000Z';
+
+    getScenarioData().then(({ service }) => {
+      createSession(service.id, 0, startsAt).then((session) => {
+        cy.visitAdmin('/schedule');
+        cy.document().its('readyState').should('eq', 'complete');
+
+        // Default 14-day window: a 2033 session shouldn't be there yet.
+        cy.get(`[data-cy="schedule-row"][data-session-id="${session.id}"]`).should('not.exist');
+
+        // Widening the "to" date and re-filtering brings it into view.
+        cy.get('[data-cy="schedule-filter-to"]').invoke('val', '2033-06-02').trigger('change');
+        cy.get('[data-cy="schedule-filter-apply"]').click();
+        cy.get(`[data-cy="schedule-row"][data-session-id="${session.id}"]`).should('be.visible');
+
+        // "Show all upcoming" clears the filter entirely and still shows it.
+        cy.get('[data-cy="schedule-filter-clear"]').click();
+        cy.get(`[data-cy="schedule-row"][data-session-id="${session.id}"]`).should('be.visible');
       });
     });
   });
