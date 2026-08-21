@@ -52,6 +52,51 @@ describe('Services CRUD (owner)', { tags: ['@smoke'] }, () => {
   });
 });
 
+  it("won't hard-delete a service that has a scheduled session", () => {
+    const sessionServiceName = `Session-Backed Service ${Date.now()}`;
+
+    cy.visitAdmin('/services/new');
+    cy.get('[data-cy="service-name-input"]').type(sessionServiceName);
+    cy.get('[data-cy="service-type-input"]').select('Class');
+    cy.get('[data-cy="service-duration-input"]').clear().type('45');
+    cy.get('[data-cy="service-capacity-input"]').clear().type('10');
+    cy.get('[data-cy="service-credit-cost-input"]').clear().type('1');
+    cy.get('[data-cy="service-save-button"]').click();
+    cy.location('pathname').should('eq', '/services');
+
+    cy.window().then((win) => {
+      const token = win.localStorage.getItem('minbody.auth.token');
+      cy.contains('[data-cy="services-row"]', sessionServiceName)
+        .find('[data-cy="services-edit-link"]').invoke('attr', 'href').then((href) => {
+          const serviceId = href.split('/').pop();
+          cy.request({
+            method: 'POST',
+            url: `${Cypress.env('apiBaseUrl')}/schedule/sessions`,
+            headers: { Authorization: `Bearer ${token}` },
+            body: {
+              serviceId,
+              resourceId: null,
+              primaryStaffMembershipId: null,
+              startsAt: '2030-01-20T10:00:00.000Z',
+              endsAt: '2030-01-20T11:00:00.000Z',
+              capacityOverride: 5,
+              isPublished: true,
+              recurrenceRule: null,
+              seriesId: null,
+            },
+          }).its('status').should('eq', 201);
+        });
+    });
+
+    cy.contains('[data-cy="services-row"]', sessionServiceName).find('[data-cy="services-edit-link"]').click();
+    cy.get('[data-cy="service-delete-button"]').click();
+
+    cy.get('[data-cy="service-form-error"]').should('be.visible').and('contain.text', 'inactive');
+    cy.visitAdmin('/services');
+    cy.get('[data-cy="services-table"]').should('contain.text', sessionServiceName);
+  });
+});
+
 describe('Services — negative cases', { tags: ['@smoke'] }, () => {
   it('does not show the Services nav link to a staff account (Owner-only)', () => {
     cy.loginAdmin('staff');

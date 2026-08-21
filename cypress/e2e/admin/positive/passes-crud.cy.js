@@ -96,6 +96,38 @@ describe('Passes CRUD (owner)', { tags: ['@smoke'] }, () => {
   });
 });
 
+  it("won't hard-delete a pass type that's been sold to a client", () => {
+    const soldPassName = `Sold Pack ${Date.now()}`;
+    const buyerName = `Guard Buyer ${Date.now()}`;
+
+    cy.visitAdmin('/pass-types/new');
+    cy.get('[data-cy="pass-type-name-input"]').type(soldPassName);
+    cy.get('[data-cy="pass-type-session-count-input"]').clear().type('5');
+    cy.get('[data-cy="pass-type-validity-days-input"]').clear().type('60');
+    cy.get('[data-cy="pass-type-price-input"]').clear().type('80');
+    cy.get('[data-cy="pass-type-save-button"]').click();
+    cy.location('pathname').should('eq', '/pass-types');
+
+    cy.visitAdmin('/clients/new');
+    cy.get('[data-cy="client-name-input"]').type(buyerName);
+    cy.get('[data-cy="client-save-button"]').click();
+    cy.location('pathname').should('eq', '/clients');
+
+    cy.contains('[data-cy="clients-row"]', buyerName).find('[data-cy="clients-edit-link"]').click();
+    cy.get('[data-cy="client-sell-pass-type-select"]').select(soldPassName + ' ($80.00)');
+    cy.get('[data-cy="client-sell-pass-button"]').click();
+    cy.get('[data-cy="client-passes-table"]').should('contain.text', soldPassName);
+
+    cy.visitAdmin('/pass-types');
+    cy.contains('[data-cy="pass-types-row"]', soldPassName).find('[data-cy="pass-types-edit-link"]').click();
+    cy.get('[data-cy="pass-type-delete-button"]').click();
+
+    cy.get('[data-cy="pass-type-form-error"]').should('be.visible').and('contain.text', 'inactive');
+    cy.visitAdmin('/pass-types');
+    cy.get('[data-cy="pass-types-table"]').should('contain.text', soldPassName);
+  });
+});
+
 describe('Passes — negative cases', { tags: ['@smoke'] }, () => {
   it('does not show the Passes nav link to a staff account (Owner-only)', () => {
     cy.loginAdmin('staff');

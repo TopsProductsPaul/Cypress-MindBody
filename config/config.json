@@ -11,9 +11,9 @@
   },
   "environments": {
     "local": {
-      "baseUrl": "https://localhost:55001",
-      "adminBaseUrl": "https://localhost:55101",
-      "apiBaseUrl": "https://localhost:55201"
+      "baseUrl": "http://localhost:55000",
+      "adminBaseUrl": "http://localhost:55100",
+      "apiBaseUrl": "http://localhost:55200"
     }
   }
 }

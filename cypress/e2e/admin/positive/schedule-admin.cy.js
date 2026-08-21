@@ -234,6 +234,65 @@ describe('Schedule booking and waitlist workflows (owner)', { tags: ['@smoke'] }
     });
   });
 
+  it('assigns a real spot to a waitlisted client promoted into a spot-based session', () => {
+    const startsAt = '2030-01-19T10:00:00.000Z';
+
+    getScenarioData().then(({ service, clients, resource }) => {
+      expect(resource, 'seeded spot resource').to.exist;
+
+      // capacityOverride: 0 -> effective capacity falls back to the resource's own spot count.
+      createSession(service.id, 0, startsAt, resource.id).then((session) => {
+        apiRequest('GET', `/schedule/sessions/${session.id}`).then((detailResponse) => {
+          const spots = detailResponse.body.freeSpots;
+          expect(spots.length, 'seeded Reformer Studio spots').to.be.at.least(2);
+
+          // Fill every spot so the room is genuinely full, not just at headcount capacity.
+          cy.wrap(spots).each((spot, i) => (
+            apiRequest('POST', '/bookings', {
+              scheduledSessionId: session.id,
+              clientId: clients[i].id,
+              resourceSpotId: spot.id,
+            }).then((res) => expect(res.status).to.eq(201))
+          )).then(() => {
+            const waitingClient = clients[spots.length];
+            apiRequest('POST', '/schedule/waitlist', {
+              scheduledSessionId: session.id,
+              clientId: waitingClient.id,
+            }).then((waitlistResponse) => {
+              expect(waitlistResponse.status).to.eq(201);
+
+              const vacatedSpot = spots[0];
+              const bookedClient = clients[0];
+
+              openSession(session.id);
+              cy.intercept('DELETE', '**/bookings/*').as('cancelBooking');
+              cy.contains('[data-cy="booking-row"]', bookedClient.name)
+                .find('[data-cy="booking-cancel-button"]').click();
+              cy.wait('@cancelBooking').its('response.statusCode').should('eq', 204);
+
+              // The promoted waiter must show the actual vacated seat, not "—" (no spot), and
+              // that seat must not simultaneously read as still free.
+              cy.contains('[data-cy="booking-row"]', waitingClient.name)
+                .should('contain.text', 'Reserved')
+                .find('td').eq(1).should('have.text', vacatedSpot.label);
+
+              apiRequest('GET', `/schedule/sessions/${session.id}`).then((afterResponse) => {
+                expect(afterResponse.body.bookedCount).to.eq(spots.length);
+                expect(afterResponse.body.freeSpots).to.have.length(0);
+              });
+
+              apiRequest('GET', `/bookings?sessionId=${session.id}`).then((rosterResponse) => {
+                const promoted = rosterResponse.body.find((b) => b.clientId === waitingClient.id);
+                expect(promoted.resourceSpotId, 'promoted booking should have an assigned spot').to.not.be.null;
+                expect(promoted.spotLabel).to.eq(vacatedSpot.label);
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+
   it('rejects duplicate waitlist entries and preserves the original queue position', () => {
     const startsAt = '2030-01-16T10:00:00.000Z';
 
